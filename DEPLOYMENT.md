@@ -70,7 +70,7 @@ npm start
 ```
 
 5. Put the server behind HTTPS.
-6. When `DATABASE_URL` is set, the app stores shop data in PostgreSQL automatically and creates the `app_state` table on first boot.
+6. When `DATABASE_URL` or Vercel-provided `POSTGRES_URL` is set, the app stores shop data in PostgreSQL automatically and creates the `app_state` table on first boot.
 7. For existing shop data, download a backup from the old system and restore it after the PostgreSQL-backed deployment is live.
 
 ## Vercel Deployment
@@ -97,7 +97,7 @@ DATABASE_URL=postgresql://...
 DATABASE_SSL=no-verify
 ```
 
-With `DATABASE_URL` set, Vercel uses PostgreSQL for durable shop data instead of the temporary local filesystem. The app creates the `app_state` table automatically on first boot. `DATABASE_SSL=no-verify` is a practical default for Supabase/Vercel-managed Postgres connections.
+With `DATABASE_URL` or Vercel-provided `POSTGRES_URL` set, Vercel uses PostgreSQL for durable shop data instead of the temporary local filesystem. The app creates the `app_state` table automatically on first boot. `DATABASE_SSL=no-verify` is a practical default for Supabase/Vercel-managed Postgres connections.
 
 ## Backup
 

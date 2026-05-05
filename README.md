@@ -35,4 +35,4 @@ Change the admin password after first login.
 
 For one shop computer, run `npm run build` and `npm start`.
 
-For real multi-device deployment, set `DATABASE_URL` to a PostgreSQL connection string such as Supabase Postgres, set a strong `JWT_SECRET`, and deploy behind HTTPS. When `DATABASE_URL` is present, the app stores its data in PostgreSQL automatically and creates the `app_state` table on first boot. Without `DATABASE_URL`, it falls back to the local JSON file for single-computer use.
+For real multi-device deployment, set `DATABASE_URL` to a PostgreSQL connection string such as Supabase Postgres, or use a Vercel Postgres/Supabase integration that injects `POSTGRES_URL`, set a strong `JWT_SECRET`, and deploy behind HTTPS. When either variable is present, the app stores its data in PostgreSQL automatically and creates the `app_state` table on first boot. Without them, it falls back to the local JSON file for single-computer use.

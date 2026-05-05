@@ -8,3 +8,4 @@ server-err.log
 npm-debug.log*
 
 .vercel
+.env*.local

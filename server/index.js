@@ -21,7 +21,7 @@ const DATA_DIR = process.env.DATA_DIR || (IS_VERCEL ? path.join(os.tmpdir(), 'ha
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const PORT = Number(process.env.PORT || 5174);
 const JWT_SECRET = process.env.JWT_SECRET || 'local-dev-change-before-deployment';
-const DATABASE_URL = String(process.env.DATABASE_URL || '').trim();
+const DATABASE_URL = String(process.env.DATABASE_URL || process.env.POSTGRES_URL || '').trim();
 const DATABASE_SSL = String(process.env.DATABASE_SSL || '').trim().toLowerCase();
 const DEFAULT_ADMIN_ID = 'usr_admin_default';
 const DB_STATE_KEY = 'hanuman-medical';
@@ -282,11 +282,28 @@ function postgresSslConfig() {
   return { rejectUnauthorized: false };
 }
 
+function postgresConnectionString() {
+  if (!usingPostgres()) return '';
+  const ssl = postgresSslConfig();
+  if (!ssl || ssl.rejectUnauthorized !== false) return DATABASE_URL;
+  try {
+    const url = new URL(DATABASE_URL);
+    if (!url.searchParams.get('sslmode')) {
+      url.searchParams.set('sslmode', 'no-verify');
+    } else if (url.searchParams.get('sslmode') === 'require') {
+      url.searchParams.set('sslmode', 'no-verify');
+    }
+    return url.toString();
+  } catch {
+    return DATABASE_URL;
+  }
+}
+
 function getPgPool() {
   if (!usingPostgres()) return null;
   if (!pgPool) {
     pgPool = new Pool({
-      connectionString: DATABASE_URL,
+      connectionString: postgresConnectionString(),
       max: Number(process.env.DATABASE_POOL_MAX || 5),
       ssl: postgresSslConfig()
     });
