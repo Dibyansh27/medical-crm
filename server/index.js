@@ -19,6 +19,7 @@ const DATA_DIR = process.env.DATA_DIR || (IS_VERCEL ? path.join(os.tmpdir(), 'ha
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const PORT = Number(process.env.PORT || 5174);
 const JWT_SECRET = process.env.JWT_SECRET || 'local-dev-change-before-deployment';
+const DEFAULT_ADMIN_ID = 'usr_admin_default';
 
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -237,7 +238,7 @@ async function createSeedDb() {
   return normalizeDb({
     users: [
       {
-        id: id('usr'),
+        id: DEFAULT_ADMIN_ID,
         name: 'Admin',
         username: 'admin',
         role: 'admin',
