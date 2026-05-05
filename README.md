@@ -35,4 +35,4 @@ Change the admin password after first login.
 
 For one shop computer, run `npm run build` and `npm start`.
 
-For real multi-device deployment, put this behind HTTPS and move `server/data/db.json` to a database such as PostgreSQL/Supabase. Set a strong `JWT_SECRET` in `.env`.
+For real multi-device deployment, set `DATABASE_URL` to a PostgreSQL connection string such as Supabase Postgres, set a strong `JWT_SECRET`, and deploy behind HTTPS. When `DATABASE_URL` is present, the app stores its data in PostgreSQL automatically and creates the `app_state` table on first boot. Without `DATABASE_URL`, it falls back to the local JSON file for single-computer use.

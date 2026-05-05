@@ -57,6 +57,8 @@ For a real multi-device shop:
 ```text
 PORT=5174
 JWT_SECRET=use-a-long-random-secret
+DATABASE_URL=postgresql://...
+DATABASE_SSL=no-verify
 ```
 
 4. Run:
@@ -68,7 +70,8 @@ npm start
 ```
 
 5. Put the server behind HTTPS.
-6. Replace `server/data/db.json` with PostgreSQL/Supabase before using multiple counters heavily.
+6. When `DATABASE_URL` is set, the app stores shop data in PostgreSQL automatically and creates the `app_state` table on first boot.
+7. For existing shop data, download a backup from the old system and restore it after the PostgreSQL-backed deployment is live.
 
 ## Vercel Deployment
 
@@ -90,13 +93,15 @@ Install Command: npm install
 
 ```text
 JWT_SECRET=use-a-long-random-secret
+DATABASE_URL=postgresql://...
+DATABASE_SSL=no-verify
 ```
 
-Vercel Functions have a read-only project filesystem and only writable temporary storage. This deployment is good for a demo, but shop data can reset between function instances or deployments. For real billing/inventory use, connect PostgreSQL, Supabase, or another hosted database before depending on Vercel as production hosting.
+With `DATABASE_URL` set, Vercel uses PostgreSQL for durable shop data instead of the temporary local filesystem. The app creates the `app_state` table automatically on first boot. `DATABASE_SSL=no-verify` is a practical default for Supabase/Vercel-managed Postgres connections.
 
 ## Backup
 
-Data is stored at:
+Without `DATABASE_URL`, data is stored at:
 
 ```text
 server/data/db.json

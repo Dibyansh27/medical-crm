@@ -6,11 +6,13 @@ import morgan from 'morgan';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import pg from 'pg';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.join(__dirname, '..');
@@ -19,7 +21,11 @@ const DATA_DIR = process.env.DATA_DIR || (IS_VERCEL ? path.join(os.tmpdir(), 'ha
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const PORT = Number(process.env.PORT || 5174);
 const JWT_SECRET = process.env.JWT_SECRET || 'local-dev-change-before-deployment';
+const DATABASE_URL = String(process.env.DATABASE_URL || '').trim();
+const DATABASE_SSL = String(process.env.DATABASE_SSL || '').trim().toLowerCase();
 const DEFAULT_ADMIN_ID = 'usr_admin_default';
+const DB_STATE_KEY = 'hanuman-medical';
+const DB_STATE_TABLE = 'app_state';
 
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -28,6 +34,8 @@ app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
 
 let dbCache = null;
+let pgPool = null;
+let postgresInitPromise = null;
 
 function id(prefix = 'id') {
   return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
@@ -261,7 +269,84 @@ async function createSeedDb() {
   });
 }
 
-async function readDb() {
+function usingPostgres() {
+  return Boolean(DATABASE_URL);
+}
+
+function postgresSslConfig() {
+  if (!usingPostgres()) return undefined;
+  if (['false', '0', 'off', 'disable'].includes(DATABASE_SSL)) return false;
+  if (['no-verify', 'allow'].includes(DATABASE_SSL)) return { rejectUnauthorized: false };
+  if (DATABASE_SSL === 'require') return {};
+  if (DATABASE_URL.includes('localhost') || DATABASE_URL.includes('127.0.0.1')) return false;
+  return { rejectUnauthorized: false };
+}
+
+function getPgPool() {
+  if (!usingPostgres()) return null;
+  if (!pgPool) {
+    pgPool = new Pool({
+      connectionString: DATABASE_URL,
+      max: Number(process.env.DATABASE_POOL_MAX || 5),
+      ssl: postgresSslConfig()
+    });
+  }
+  return pgPool;
+}
+
+function attachDbVersion(db, version) {
+  Object.defineProperty(db, '__version', {
+    value: Number(version) || 1,
+    writable: true,
+    configurable: true,
+    enumerable: false
+  });
+  return db;
+}
+
+function getDbVersion(db) {
+  return Number.isFinite(db?.__version) ? Number(db.__version) : null;
+}
+
+async function ensurePostgresStorage() {
+  if (!usingPostgres()) return;
+  if (!postgresInitPromise) {
+    postgresInitPromise = (async () => {
+      const pool = getPgPool();
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS ${DB_STATE_TABLE} (
+          state_key text PRIMARY KEY,
+          data jsonb NOT NULL,
+          version integer NOT NULL DEFAULT 1,
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      const seedDb = await createSeedDb();
+      await pool.query(
+        `
+          INSERT INTO ${DB_STATE_TABLE} (state_key, data, version, updated_at)
+          VALUES ($1, $2::jsonb, 1, now())
+          ON CONFLICT (state_key) DO NOTHING
+        `,
+        [DB_STATE_KEY, JSON.stringify(seedDb)]
+      );
+    })();
+  }
+  try {
+    await postgresInitPromise;
+  } catch (error) {
+    postgresInitPromise = null;
+    throw error;
+  }
+}
+
+function staleWriteError() {
+  const error = new Error('Shop data changed on the server. Please try that action again.');
+  error.status = 409;
+  return error;
+}
+
+async function readFileDb() {
   if (dbCache) return dbCache;
   await fs.mkdir(DATA_DIR, { recursive: true });
   try {
@@ -275,7 +360,7 @@ async function readDb() {
   return dbCache;
 }
 
-async function writeDb(db) {
+async function writeFileDb(db) {
   normalizeDb(db);
   await fs.mkdir(DATA_DIR, { recursive: true });
   const tmp = `${DB_FILE}.tmp`;
@@ -283,6 +368,55 @@ async function writeDb(db) {
   await fs.rename(tmp, DB_FILE);
   dbCache = db;
   return db;
+}
+
+async function readPostgresDb() {
+  await ensurePostgresStorage();
+  const pool = getPgPool();
+  const { rows } = await pool.query(
+    `SELECT data, version FROM ${DB_STATE_TABLE} WHERE state_key = $1 LIMIT 1`,
+    [DB_STATE_KEY]
+  );
+  const row = rows[0];
+  const db = normalizeDb(row?.data || await createSeedDb());
+  return attachDbVersion(db, row?.version || 1);
+}
+
+async function writePostgresDb(db) {
+  normalizeDb(db);
+  await ensurePostgresStorage();
+  const pool = getPgPool();
+  const currentVersion = getDbVersion(db);
+  const query = currentVersion === null
+    ? {
+        text: `
+          UPDATE ${DB_STATE_TABLE}
+          SET data = $2::jsonb, version = version + 1, updated_at = now()
+          WHERE state_key = $1
+          RETURNING version
+        `,
+        values: [DB_STATE_KEY, JSON.stringify(db)]
+      }
+    : {
+        text: `
+          UPDATE ${DB_STATE_TABLE}
+          SET data = $2::jsonb, version = version + 1, updated_at = now()
+          WHERE state_key = $1 AND version = $3
+          RETURNING version
+        `,
+        values: [DB_STATE_KEY, JSON.stringify(db), currentVersion]
+      };
+  const { rows } = await pool.query(query);
+  if (!rows.length) throw staleWriteError();
+  return attachDbVersion(db, rows[0].version);
+}
+
+async function readDb() {
+  return usingPostgres() ? readPostgresDb() : readFileDb();
+}
+
+async function writeDb(db) {
+  return usingPostgres() ? writePostgresDb(db) : writeFileDb(db);
 }
 
 function asyncRoute(handler) {
@@ -360,7 +494,11 @@ function summary(db) {
   };
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'Hanuman Medical API' }));
+app.get('/api/health', (_req, res) => res.json({
+  ok: true,
+  app: 'Hanuman Medical API',
+  storage: usingPostgres() ? 'postgres' : 'json-file'
+}));
 
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const username = String(req.body.username || '').trim().toLowerCase();
@@ -794,7 +932,7 @@ app.get('*', async (_req, res, next) => {
 app.use((req, res) => res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` }));
 app.use((error, _req, res, _next) => {
   console.error(error);
-  res.status(500).json({ error: error.message || 'Server error' });
+  res.status(error.status || 500).json({ error: error.message || 'Server error' });
 });
 
 export { app, readDb };
