@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+server/data/db.json
+server/data/*.bak.json
+server-out.log
+server-err.log
+npm-debug.log*
