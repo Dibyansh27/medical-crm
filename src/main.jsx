@@ -37,6 +37,23 @@ const navItems = [
   { key: 'settings', label: 'Settings', icon: Settings }
 ];
 
+const DEFAULT_WHATSAPP_FOLLOWUP_MESSAGE = 'Namaste {customer}, {shop} se. Aapki medicine ka term khatam ho gaya hai. Kya aapko aur medicine chahiye? Hum ready kar denge.';
+
+function formatWhatsAppFollowupMessage(settings, customer) {
+  const template = settings?.whatsappFollowupMessage || DEFAULT_WHATSAPP_FOLLOWUP_MESSAGE;
+  const values = {
+    customer: customer?.name || 'Customer',
+    mobile: customer?.mobile || '',
+    shop: settings?.shopName || 'Hanuman Medical',
+    phone: settings?.shopPhone || ''
+  };
+  return Object.entries(values).reduce((message, [key, value]) => (
+    message
+      .replace(new RegExp(`\\{${key}\\}`, 'gi'), value)
+      .replace(new RegExp(`\\[${key}\\]`, 'gi'), value)
+  ), template);
+}
+
 function useLoad(user) {
   const [state, setState] = useState({
     loading: true,
@@ -711,7 +728,7 @@ function Customers({ data, reload, toast, user }) {
       )}
       <div className="customer-grid">
         {customers.map((customer) => {
-          const msg = `Namaste ${customer.name}, Hanuman Medical se. Aapki medicine ka term khatam ho gaya hai. Kya aapko aur medicine chahiye? Hum ready kar denge.`;
+          const msg = formatWhatsAppFollowupMessage(data.settings, customer);
           const status = customerFollowupStatus(customer);
           return (
             <div className="customer-card" key={customer.id}>
@@ -860,10 +877,72 @@ function Reminders({ data, reload, toast, user }) {
   );
 }
 
+function CustomerSearchSelect({ customers, value, onChange }) {
+  const selected = customers.find((customer) => customer.id === value);
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    setQuery(selected ? `${selected.name} · ${selected.mobile}` : '');
+  }, [selected?.id]);
+
+  const normalized = query.trim().toLowerCase();
+  const matches = customers
+    .filter((customer) => {
+      if (!normalized) return true;
+      return [customer.name, customer.mobile, customer.address, customer.tags]
+        .some((field) => String(field || '').toLowerCase().includes(normalized));
+    })
+    .slice(0, 8);
+
+  const choose = (customer) => {
+    onChange(customer.id);
+    setQuery(`${customer.name} · ${customer.mobile}`);
+    setOpen(false);
+  };
+
+  const handleChange = (event) => {
+    setQuery(event.target.value);
+    onChange('');
+    setOpen(true);
+  };
+
+  return (
+    <div className="customer-picker">
+      <input
+        value={query}
+        onChange={handleChange}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && matches[0]) {
+            event.preventDefault();
+            choose(matches[0]);
+          }
+        }}
+        placeholder="Search customer by name or mobile"
+        aria-expanded={open}
+      />
+      {open && (
+        <div className="customer-picker-menu" role="listbox">
+          {matches.map((customer) => (
+            <button type="button" key={customer.id} onMouseDown={() => choose(customer)}>
+              <strong>{customer.name}</strong>
+              <span>{customer.mobile || 'No mobile'}</span>
+            </button>
+          ))}
+          {!matches.length && <div className="customer-picker-empty">No customer found</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Calls({ data, reload, toast, user }) {
   const [form, setForm] = useState({ customerId: '', outcome: 'contacted', duration: 0, notes: '', nextAction: '', nextActionDate: '' });
   const canManage = user.role === 'admin';
   const save = async () => {
+    if (!form.customerId) return toast('Select customer first', 'warn');
     await api('/calls', { method: 'POST', body: form });
     setForm({ customerId: '', outcome: 'contacted', duration: 0, notes: '', nextAction: '', nextActionDate: '' });
     toast('Call logged');
@@ -877,7 +956,12 @@ function Calls({ data, reload, toast, user }) {
           <div className="form-grid">
             <label>
               Customer
-              <select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}>
+              <CustomerSearchSelect
+                customers={data.customers}
+                value={form.customerId}
+                onChange={(customerId) => setForm({ ...form, customerId })}
+              />
+              <select className="legacy-customer-select" value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}>
                 <option value="">Select customer</option>
                 {data.customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name} · {customer.mobile}</option>)}
               </select>
@@ -991,6 +1075,7 @@ function SettingsPage({ data, reload, toast, user, setUser }) {
           <label>Shop Name<input disabled={!canManage} value={form.shopName || ''} onChange={(e) => setForm({ ...form, shopName: e.target.value })} /></label>
           <label>Phone<input disabled={!canManage} value={form.shopPhone || ''} onChange={(e) => setForm({ ...form, shopPhone: e.target.value })} /></label>
           <label className="wide">Address<input disabled={!canManage} value={form.shopAddress || ''} onChange={(e) => setForm({ ...form, shopAddress: e.target.value })} /></label>
+          <label className="wide">WhatsApp Message<textarea disabled={!canManage} value={form.whatsappFollowupMessage || ''} onChange={(e) => setForm({ ...form, whatsappFollowupMessage: e.target.value })} placeholder={DEFAULT_WHATSAPP_FOLLOWUP_MESSAGE} /></label>
         </div>
         {canManage && <button className="primary-btn" onClick={save}>Save Settings</button>}
       </Card>

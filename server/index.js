@@ -26,6 +26,7 @@ const DATABASE_SSL = String(process.env.DATABASE_SSL || '').trim().toLowerCase()
 const DEFAULT_ADMIN_ID = 'usr_admin_default';
 const DB_STATE_KEY = 'hanuman-medical';
 const DB_STATE_TABLE = 'app_state';
+const DEFAULT_WHATSAPP_FOLLOWUP_MESSAGE = 'Namaste {customer}, {shop} se. Aapki medicine ka term khatam ho gaya hai. Kya aapko aur medicine chahiye? Hum ready kar denge.';
 
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -239,7 +240,24 @@ function normalizeDb(db) {
   db.settings.shopPhone ||= '7880042681';
   db.settings.shopAddress ||= 'Medical Store';
   db.settings.currency ||= 'INR';
+  db.settings.whatsappFollowupMessage ||= DEFAULT_WHATSAPP_FOLLOWUP_MESSAGE;
   return db;
+}
+
+function renderWhatsAppFollowupMessage(settings, customer) {
+  const template = settings?.whatsappFollowupMessage || DEFAULT_WHATSAPP_FOLLOWUP_MESSAGE;
+  const replacements = {
+    customer: customer?.name || 'Customer',
+    mobile: customer?.mobile || '',
+    shop: settings?.shopName || 'Hanuman Medical',
+    phone: settings?.shopPhone || ''
+  };
+  return Object.entries(replacements).reduce((message, [key, value]) => (
+    message
+      .replaceAll(`{${key}}`, value)
+      .replaceAll(`[${key}]`, value)
+      .replaceAll(`[${key[0].toUpperCase()}${key.slice(1)}]`, value)
+  ), template);
 }
 
 async function createSeedDb() {
@@ -264,7 +282,8 @@ async function createSeedDb() {
       shopName: 'Hanuman Medical',
       shopPhone: '7880042681',
       shopAddress: 'Medical Store',
-      currency: 'INR'
+      currency: 'INR',
+      whatsappFollowupMessage: DEFAULT_WHATSAPP_FOLLOWUP_MESSAGE
     }
   });
 }
@@ -479,7 +498,7 @@ function dueFollowups(db) {
       customer,
       type: 'followup',
       dueDate: customer.nextFollowUp,
-      message: `Namaste ${customer.name}, Hanuman Medical se. Aapki medicine ka term khatam ho gaya hai. Kya aapko aur medicine chahiye? Hum ready kar denge.`
+      message: renderWhatsAppFollowupMessage(db.settings, customer)
     }));
 }
 
@@ -539,7 +558,7 @@ app.get('/api/summary', requireAuth, (req, res) => res.json(summary(req.db)));
 
 app.get('/api/settings', requireAuth, (req, res) => res.json(req.db.settings));
 app.patch('/api/settings', requireAuth, adminOnly, asyncRoute(async (req, res) => {
-  const allowed = ['shopName', 'shopPhone', 'shopAddress', 'currency'];
+  const allowed = ['shopName', 'shopPhone', 'shopAddress', 'currency', 'whatsappFollowupMessage'];
   for (const key of allowed) {
     if (req.body[key] !== undefined) req.db.settings[key] = String(req.body[key]).trim();
   }
